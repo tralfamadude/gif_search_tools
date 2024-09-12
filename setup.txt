@@ -1,0 +1,13 @@
+# using pip of clip-retrieval, not a repo clone.
+
+conda create -n gifcities_exp python=3.10
+conda activate gifcities_exp
+pip install clip-retrieval img2dataset
+pip install open_clip_torch torch
+pip install statistics
+pip install argparse
+pip install codetiming
+pip install numpy
+pip install scikit-learn
+pip install numpy
+pip install pillow
