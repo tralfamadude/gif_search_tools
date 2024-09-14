@@ -65,65 +65,50 @@ def extract_hashes_from_jsonl(file_path):
     return hashes_set
 
 
-def most_different_vectors(vectors, top_n=3, threshold=0.999):
+def most_different_vectors(vector_list, k=3, threshold=0.99):
     """
-    Identify up to `top_n` most different vectors based on cosine similarity.
+    Selects up to k diverse vectors using the Maxmin algorithm. 
+    Complexity: O(kn)
     
-    Parameters:
-    vectors (list of numpy arrays): List of vectors to check.
-    top_n (int): Maximum number of most different vectors to return.
-    threshold (float): Cosine similarity threshold to consider vectors as too similar.
+    Args:
+    vector_list (list): List of numpy arrays or lists, each representing a vector
+    k (int): Maximum number of vectors to select
+    threshold (float): Cosine similarity threshold. If all remaining vectors are within
+                       this threshold of similarity to selected vectors, stop selecting.
     
     Returns:
-    list of numpy arrays: List of up to `top_n` most different vectors.
+    list of numpy arrays: List of up to `k` most different vectors.
     """
-    # Calculate pairwise cosine similarity
-    similarity_matrix = cosine_similarity(vectors)
+    n_vectors = len(vector_list)
     
-    # Check if all vectors are similar based on the threshold
-    n = len(vectors)
-    all_similar = True
-    for i in range(n):
-        for j in range(i + 1, n):
-            if similarity_matrix[i, j] < threshold:
-                all_similar = False
-                break
-        if not all_similar:
-            break
+    # Convert list of vectors to 2D numpy array
+    vectors = np.array([np.array(v) for v in vector_list])
     
-    # If all vectors are too similar, return just one vector
-    if all_similar:
-        return [vectors[0]]
+    # Normalize vectors for cosine similarity
+    norms = np.linalg.norm(vectors, axis=1, keepdims=True)
+    normalized_vectors = vectors / norms
     
-    # Convert similarity matrix to dissimilarity (1 - similarity)
-    dissimilarity_matrix = 1 - similarity_matrix
+    # Initialize with a random vector
+    selected = [np.random.randint(n_vectors)]
     
-    # Sum the dissimilarity for each vector to rank them
-    dissimilarity_sums = np.sum(dissimilarity_matrix, axis=1)
-    
-    # Sort vectors by their dissimilarity sums (most dissimilar vectors first)
-    sorted_indices = np.argsort(dissimilarity_sums)[::-1]
-    
-    # Initialize result list with the first most different vector
-    result = [vectors[sorted_indices[0]]]
-    
-    # Now, iteratively add vectors that are dissimilar from those already selected
-    for idx in sorted_indices[1:]:
-        if len(result) >= top_n:
+    while len(selected) < k:
+        # Compute cosine similarities between selected and all vectors
+        similarities = np.dot(normalized_vectors, normalized_vectors[selected].T)
+        
+        # Find the maximum similarity for each vector to any selected vector
+        max_similarities = np.max(similarities, axis=1)
+        
+        # Find the vector with the minimum max similarity (i.e., most diverse)
+        candidate_idx = np.argmin(max_similarities)
+        
+        # Check if the candidate is diverse enough
+        if 1 - max_similarities[candidate_idx] <= threshold:
+            # If not diverse enough, stop selecting
             break
         
-        # Check if the new vector is sufficiently different from all selected vectors
-        is_different = True
-        for selected_idx in [sorted_indices[0] for sorted_idx in result]:
-            # Use precomputed similarity matrix instead of calling cosine_similarity again
-            if similarity_matrix[idx, selected_idx] >= threshold:
-                is_different = False
-                break
-        
-        if is_different:
-            result.append(vectors[idx])
+        selected.append(candidate_idx)
     
-    return result
+    return [vector_list[i] for i in selected]
 
 
 def process_input_files(input_files, model_name, pretrained, output_file, k=3, neighborhood_threshold=0.1):
@@ -157,7 +142,6 @@ def process_input_files(input_files, model_name, pretrained, output_file, k=3, n
                 line = line.strip()
                 if not line:
                     continue
-
 
                 # Process the line to extract hash and GIF binary
                 hash_value, gif_binary = process_jsonl_line(line)
