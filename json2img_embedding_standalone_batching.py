@@ -65,7 +65,7 @@ def extract_hashes_from_jsonl(file_path):
     return hashes_set
 
 
-def most_different_vectors(vector_list, k=3, threshold=0.99):
+def most_different_vectors(vector_list, k=3, threshold=0.05):
     """
     Selects up to k diverse vectors using the Maxmin algorithm. 
     Complexity: O(kn)
@@ -111,16 +111,16 @@ def most_different_vectors(vector_list, k=3, threshold=0.99):
     return [vector_list[i] for i in selected]
 
 
-def process_input_files(input_files, model_name, pretrained, output_file, k=3, neighborhood_threshold=0.1):
+def process_input_files(input_files, model_name, pretrained, output_file, k=3, neighborhood_threshold=0.05):
     # Initialize OpenCLIP model and preprocessing
     start_model_loading = time.time()
     print("Initialize OpenCLIP model with pretraing", file=sys.stderr)
 
     model, _, preprocess = open_clip.create_model_and_transforms(model_name, pretrained)
     model = model.to(device).eval()
-    model.half()  ### fp16 ####
+    model.half(); print("precision=fp16")  ### fp16 ####
     finish_model_loading = time.time()
-    print(f"Model loaded in {finish_model_loading-inference_mode} sec", file=sys.stderr)
+    print(f"Model loaded in {finish_model_loading-start_model_loading} sec", file=sys.stderr)
     
     if os.path.exists(output_file):
         previously_processed = extract_hashes_from_jsonl(output_file)
@@ -171,17 +171,17 @@ def process_input_files(input_files, model_name, pretrained, output_file, k=3, n
                 #
                 #  run the model to get embeddings
                 #
-                with torch.inference_mode():
+                with torch.no_grad():
                     # Move the entire batch to the GPU 
                     # (not using because too small: Async CPU to GPU transfer: non_blocking=True)
-                    batch_tensor = batch_tensor.to(device)  
+                    batch_tensor = batch_tensor.to(device).half()
                     # Encode the entire batch of images on the GPU
                     batch_embeddings = model.encode_image(batch_tensor)
                 # Move the resulting embeddings back to CPU
                 embeddings = batch_embeddings.cpu().numpy()
                         
                 # select representative vectors to reduce the number of embeddings 
-                selected_embeddings = most_different_vectors(embeddings, k=k, threshold=(1.0 - neighborhood_threshold))
+                selected_embeddings = most_different_vectors(embeddings, k=k, threshold=neighborhood_threshold)
 
                 total_embeddings_saved += len(selected_embeddings)
                 if embedding_dimensions == 0:
@@ -201,7 +201,7 @@ def process_input_files(input_files, model_name, pretrained, output_file, k=3, n
     print(f"Total gifs={total_gifs_processed} images={total_images_processed} embeddings_saved={total_embeddings_saved}")
     print(f"total_time_secs={total_time}")
     if total_gifs_processed > 0:
-        print(f"gifs/sec={total_gifs_processed/total_time}")
+        print(f"gifs/sec={total_gifs_processed/total_time}  images/sec={total_images_processed/total_time}")
         print(f"images per gif={total_images_processed/total_gifs_processed}  embeddings per gif={total_embeddings_saved/total_gifs_processed}")
 
     if output_file:
