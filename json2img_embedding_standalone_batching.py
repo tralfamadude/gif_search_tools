@@ -3,24 +3,22 @@ import os
 import json
 import torch
 import torch.cuda
-from torch.cuda.amp import autocast
 import base64
 from PIL import Image
 from io import BytesIO
 import open_clip
-from sklearn.cluster import KMeans
-from sklearn.exceptions import ConvergenceWarning
-from scipy.spatial.distance import cosine
+#from sklearn.cluster import KMeans
+#from sklearn.exceptions import ConvergenceWarning
+#from scipy.spatial.distance import cosine
 from collections import defaultdict
-from codetiming import Timer
+#from codetiming import Timer
 import time
 import numpy as np
-from sklearn.metrics.pairwise import cosine_similarity
-import warnings
+#from sklearn.metrics.pairwise import cosine_similarity
+#import warnings
 #from line_profiler import LineProfiler # temporary
 
-warnings.filterwarnings("ignore", category=ConvergenceWarning)  # supress warnings if clusters < k for Kmeans
-
+#warnings.filterwarnings("ignore", category=ConvergenceWarning)  # supress warnings if clusters < k for Kmeans
 
 
 device = "cuda" if torch.cuda.is_available() else "cpu"
@@ -67,76 +65,63 @@ def extract_hashes_from_jsonl(file_path):
     return hashes_set
 
 
-def most_different_vectors(vectors, top_n=3, threshold=0.999):
+def most_different_vectors(vector_list, k=3, threshold=0.99):
     """
-    Identify up to `top_n` most different vectors based on cosine similarity.
+    Selects up to k diverse vectors using the Maxmin algorithm. 
+    Complexity: O(kn)
     
-    Parameters:
-    vectors (list of numpy arrays): List of vectors to check.
-    top_n (int): Maximum number of most different vectors to return.
-    threshold (float): Cosine similarity threshold to consider vectors as too similar.
+    Args:
+    vector_list (list): List of numpy arrays or lists, each representing a vector
+    k (int): Maximum number of vectors to select
+    threshold (float): Cosine similarity threshold. If all remaining vectors are within
+                       this threshold of similarity to selected vectors, stop selecting.
     
     Returns:
-    list of numpy arrays: List of up to `top_n` most different vectors.
+    list of numpy arrays: List of up to `k` most different vectors.
     """
-    # Calculate pairwise cosine similarity
-    similarity_matrix = cosine_similarity(vectors)
+    n_vectors = len(vector_list)
     
-    # Check if all vectors are similar based on the threshold
-    n = len(vectors)
-    all_similar = True
-    for i in range(n):
-        for j in range(i + 1, n):
-            if similarity_matrix[i, j] < threshold:
-                all_similar = False
-                break
-        if not all_similar:
-            break
+    # Convert list of vectors to 2D numpy array
+    vectors = np.array([np.array(v) for v in vector_list])
     
-    # If all vectors are too similar, return just one vector
-    if all_similar:
-        return [vectors[0]]
+    # Normalize vectors for cosine similarity
+    norms = np.linalg.norm(vectors, axis=1, keepdims=True)
+    normalized_vectors = vectors / norms
     
-    # Convert similarity matrix to dissimilarity (1 - similarity)
-    dissimilarity_matrix = 1 - similarity_matrix
+    # Initialize with a random vector
+    selected = [np.random.randint(n_vectors)]
     
-    # Sum the dissimilarity for each vector to rank them
-    dissimilarity_sums = np.sum(dissimilarity_matrix, axis=1)
-    
-    # Sort vectors by their dissimilarity sums (most dissimilar vectors first)
-    sorted_indices = np.argsort(dissimilarity_sums)[::-1]
-    
-    # Initialize result list with the first most different vector
-    result = [vectors[sorted_indices[0]]]
-    
-    # Now, iteratively add vectors that are dissimilar from those already selected
-    for idx in sorted_indices[1:]:
-        if len(result) >= top_n:
+    while len(selected) < k:
+        # Compute cosine similarities between selected and all vectors
+        similarities = np.dot(normalized_vectors, normalized_vectors[selected].T)
+        
+        # Find the maximum similarity for each vector to any selected vector
+        max_similarities = np.max(similarities, axis=1)
+        
+        # Find the vector with the minimum max similarity (i.e., most diverse)
+        candidate_idx = np.argmin(max_similarities)
+        
+        # Check if the candidate is diverse enough
+        if 1 - max_similarities[candidate_idx] <= threshold:
+            # If not diverse enough, stop selecting
             break
         
-        # Check if the new vector is sufficiently different from all selected vectors
-        is_different = True
-        for selected_idx in [sorted_indices[0] for sorted_idx in result]:
-            # Use precomputed similarity matrix instead of calling cosine_similarity again
-            if similarity_matrix[idx, selected_idx] >= threshold:
-                is_different = False
-                break
-        
-        if is_different:
-            result.append(vectors[idx])
+        selected.append(candidate_idx)
     
-    return result
+    return [vector_list[i] for i in selected]
 
 
 def process_input_files(input_files, model_name, pretrained, output_file, k=3, neighborhood_threshold=0.1):
     # Initialize OpenCLIP model and preprocessing
+    start_model_loading = time.time()
     print("Initialize OpenCLIP model with pretraing", file=sys.stderr)
-    with Timer(name="load model"):
-        model, _, preprocess = open_clip.create_model_and_transforms(model_name, pretrained)
-        model = model.to(device).eval()
-    print("Model is loaded", file=sys.stderr)
 
-    # find out what has already been processed so we do not re-do it
+    model, _, preprocess = open_clip.create_model_and_transforms(model_name, pretrained)
+    model = model.to(device).eval()
+    model.half()  ### fp16 ####
+    finish_model_loading = time.time()
+    print(f"Model loaded in {finish_model_loading-inference_mode} sec", file=sys.stderr)
+    
     if os.path.exists(output_file):
         previously_processed = extract_hashes_from_jsonl(output_file)
     else:
@@ -161,7 +146,6 @@ def process_input_files(input_files, model_name, pretrained, output_file, k=3, n
                 if not line:
                     continue
 
-
                 # Process the line to extract hash and GIF binary
                 hash_value, gif_binary = process_jsonl_line(line)
 
@@ -169,44 +153,35 @@ def process_input_files(input_files, model_name, pretrained, output_file, k=3, n
                 if hash_value in previously_processed:
                     continue
 
-                # get images from the GIF
                 images = extract_images_from_gif(gif_binary, hash=hash_value)
                 if len(images) == 0:
-                    continue  # we have a dud
+                    continue
 
                 total_gifs_processed += 1
                 embeddings = []
                 batch_images = []
                 total_images_processed += len(images)
-                
-                # Preprocess the images 
+
+                # Preprocess all the images on cpu into batch_images list of tensors
                 for image in images:
-                    image_tensor = preprocess(image).unsqueeze(0)  # Preprocessing on CPU
+                    image_tensor = preprocess(image).unsqueeze(0)
                     batch_images.append(image_tensor)
                 # Concatenate all image tensors into a single batch
                 batch_tensor = torch.cat(batch_images, dim=0)
-                # run the model to get embeddings
-                with torch.no_grad():
-                    # Move the entire batch to the GPU asynchronously
-                    batch_tensor = batch_tensor.to(device, non_blocking=True)  # Async CPU to GPU transfer
-                    # Use autocast for mixed precision inference
-                    with autocast():
-                        # Encode the entire batch of images on the GPU
-                        batch_embeddings = model.encode_image(batch_tensor)
-                # Move the resulting embeddings back to CPU asynchronously
-                embeddings = batch_embeddings.cpu(non_blocking=True).numpy()
-
-                #for image in images:
-                #    image_tensor = preprocess(image).unsqueeze(0).to(device)  # Add batch dimension
-                #    with torch.no_grad():
-                #        image_embedding = model.encode_image(image_tensor).squeeze(0)  # Remove batch dimension
-                #        embeddings.append(image_embedding.cpu().numpy())
-
-                
-
+                #
+                #  run the model to get embeddings
+                #
+                with torch.inference_mode():
+                    # Move the entire batch to the GPU 
+                    # (not using because too small: Async CPU to GPU transfer: non_blocking=True)
+                    batch_tensor = batch_tensor.to(device)  
+                    # Encode the entire batch of images on the GPU
+                    batch_embeddings = model.encode_image(batch_tensor)
+                # Move the resulting embeddings back to CPU
+                embeddings = batch_embeddings.cpu().numpy()
+                        
                 # select representative vectors to reduce the number of embeddings 
-                selected_embeddings = most_different_vectors(embeddings, top_n=k, threshold=(1.0 - neighborhood_threshold))
-                # print(f"{hash_value}: {len(selected_embeddings)}")
+                selected_embeddings = most_different_vectors(embeddings, k=k, threshold=(1.0 - neighborhood_threshold))
 
                 total_embeddings_saved += len(selected_embeddings)
                 if embedding_dimensions == 0:
@@ -222,6 +197,7 @@ def process_input_files(input_files, model_name, pretrained, output_file, k=3, n
 
     finish_processing = time.time()
     total_time = finish_processing-start_processing
+    print(f"embedding_dimensions={embedding_dimensions}")
     print(f"Total gifs={total_gifs_processed} images={total_images_processed} embeddings_saved={total_embeddings_saved}")
     print(f"total_time_secs={total_time}")
     if total_gifs_processed > 0:
