@@ -4,6 +4,7 @@ from scipy.spatial.distance import cosine
 import torch
 from sklearn.metrics.pairwise import cosine_similarity
 
+# KMeans method here
 
 # The select_representative_vectors function as defined previously
 def select_representative_vectors(embeddings, k, neighborhood_threshold=0.1):
