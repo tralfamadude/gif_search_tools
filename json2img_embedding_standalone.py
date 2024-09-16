@@ -113,11 +113,13 @@ def most_different_vectors(vector_list, k=3, threshold=0.99):
 
 def process_input_files(input_files, model_name, pretrained, output_file, k=3, neighborhood_threshold=0.1):
     # Initialize OpenCLIP model and preprocessing
+    start_model_loading = time.time()
     print("Initialize OpenCLIP model with pretraing", file=sys.stderr)
-    with Timer(name="load model"):
-        model, _, preprocess = open_clip.create_model_and_transforms(model_name, pretrained)
-        model = model.to(device).eval()
-    print("Model is loaded", file=sys.stderr)
+    model, _, preprocess = open_clip.create_model_and_transforms(model_name, pretrained)
+    model = model.to(device).eval()
+    model.half(); print("precision=fp16")  ### fp16 ####
+    finish_model_loading = time.time()
+    print(f"Model loaded in {finish_model_loading-start_model_loading} sec", file=sys.stderr)
     
     if os.path.exists(output_file):
         previously_processed = extract_hashes_from_jsonl(output_file)
