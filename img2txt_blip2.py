@@ -2,6 +2,7 @@ import argparse
 import torch
 from PIL import Image
 from transformers import Blip2Processor, Blip2ForConditionalGeneration
+import time
 
 """
 Image Captioning using BLIP-2.
@@ -20,6 +21,7 @@ class BLIP2Wrapper:
         self.device = "cuda" if torch.cuda.is_available() else "cpu"
         print(f"Using device: {self.device}")
 
+        start_model_loading = time.time()
         self.processor = Blip2Processor.from_pretrained(model_name)
         self.model = Blip2ForConditionalGeneration.from_pretrained(
             model_name, 
@@ -28,6 +30,8 @@ class BLIP2Wrapper:
         )
 
         self.model.to(self.device)
+        finish_model_loading = time.time()
+        print(f"Model loaded in {finish_model_loading-start_model_loading} sec", file=sys.stderr)
         
         self.generation_config = {
             "temperature": temperature,
@@ -37,6 +41,7 @@ class BLIP2Wrapper:
 
     def image_to_text(self, images, batch_size=4, max_new_tokens=50):
         results = []
+        start_inference = time.time()
         for i in range(0, len(images), batch_size):
             batch = images[i:i+batch_size]
             inputs = self.processor(images=batch, return_tensors="pt").to(self.device)
@@ -49,7 +54,11 @@ class BLIP2Wrapper:
             
             generated_texts = self.processor.batch_decode(generated_ids, skip_special_tokens=True)
             results.extend(generated_texts)
-        
+
+        finish_inference = time.time()
+        total_time = finish_inference - start_inference
+        if len(images) > 0 and total_time > 0.0:
+            print(f"BLIP2: Images procesed: n={len(images)} total_time={total_time} sec per_image={len(images)/total_time} sec", file=sys.stderr)
         return results
 
 def main():
