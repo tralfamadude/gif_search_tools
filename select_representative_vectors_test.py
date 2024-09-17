@@ -3,8 +3,11 @@ from sklearn.cluster import KMeans
 from scipy.spatial.distance import cosine
 import torch
 from sklearn.metrics.pairwise import cosine_similarity
+import warnings
 
-# KMeans method here
+#warnings.filterwarnings("ignore", category=ConvergenceWarning)  # supress warnings if clusters < k for Kmeans
+
+# KMeans method testing here
 
 # The select_representative_vectors function as defined previously
 def select_representative_vectors(embeddings, k, neighborhood_threshold=0.1):
