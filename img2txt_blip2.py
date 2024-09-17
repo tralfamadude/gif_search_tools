@@ -3,6 +3,12 @@ import torch
 from PIL import Image
 from transformers import Blip2Processor, Blip2ForConditionalGeneration
 
+"""
+Image Captioning using BLIP-2.
+
+Model is cached under ~/.cache; to change that, set env var TRANSFORMERS_CACHE.
+"""
+
 class BLIP2Wrapper:
     def __init__(self):
         self.model = None
