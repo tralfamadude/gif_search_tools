@@ -12,3 +12,4 @@ pip install scikit-learn
 pip install numpy
 pip install pillow
 pip install accelerate
+pip install nltk
