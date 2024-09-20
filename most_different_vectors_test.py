@@ -28,10 +28,10 @@ def maxmin_diversity(vector_list, k, threshold):
     while len(selected) < k:
         # Compute cosine similarities between selected and all vectors
         similarities = np.dot(normalized_vectors, normalized_vectors[selected].T)
-        
-        # Find the maximum similarity for each vector to any selected vector
-        max_similarities = np.max(similarities, axis=1)
-        
+                
+        # mask out already selected indices
+        max_similarities[selected] = np.inf
+
         # Find the vector with the minimum max similarity (i.e., most diverse)
         candidate_idx = np.argmin(max_similarities)
         
@@ -50,7 +50,7 @@ if __name__ == "__main__":
     threshold = 0.05
     
     # Helper function to create a slightly perturbed version of a vector
-    def perturb(v, scale=0.01):
+    def perturb(v, scale=0.001):
         v = np.array(v)  # Convert to numpy array if it's a list
         return v + np.random.normal(0, scale, v.size)
     
@@ -75,8 +75,14 @@ if __name__ == "__main__":
     
     # Test case 5: 2 vectors pointed in exactly opposite directions
     vectors5 = [[1, 0, 0], [-1, 0, 0]]
-    
-    test_cases = [vectors1, vectors2, vectors3, vectors4, vectors5]
+
+    # Test case 6: more than 3 exactly duplicated vectors
+    vectors6 = [[1, -1, 1],[1, -1, 1],[1, -1, 1],[1, -1, 1],[1, -1, 1],[1, -1, 1],[1, -1, 1]]
+
+    # Test case 7: many 0 vectors
+    vectors7 = [[0,0,0],[0,0,0],[0,0,0],[0,0,0],[0,0,0],[0,0,0]]
+
+    test_cases = [vectors1, vectors2, vectors3, vectors4, vectors5, vectors6, vectors7]
     
     for i, vectors in enumerate(test_cases, 1):
         result = maxmin_diversity(vectors, k, threshold)
