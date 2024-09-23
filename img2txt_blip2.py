@@ -4,6 +4,7 @@ import torch
 from PIL import Image
 from transformers import Blip2Processor, Blip2ForConditionalGeneration
 import time
+import sys
 
 """
 Image Captioning using BLIP-2.
@@ -17,7 +18,7 @@ class BLIP2Wrapper:
         self.processor = None
         self.device = None
 
-    def initialize(self, model_name="Salesforce/blip2-opt-2.7b", temperature=1.0, fp16=False, 
+    def initialize(self, model_name="Salesforce/blip2-opt-2.7b", temperature=1.0, fp16=True, 
                    length_penalty=1.0, search_method="beam", num_beams=5, top_p=0.9):
         self.device = "cuda" if torch.cuda.is_available() else "cpu"
         print(f"Using device: {self.device}")
@@ -26,13 +27,13 @@ class BLIP2Wrapper:
         self.processor = Blip2Processor.from_pretrained(model_name)
         self.model = Blip2ForConditionalGeneration.from_pretrained(
             model_name, 
-            torch_dtype=torch.float16 if fp16 else torch.float32,
-            device_map="auto"
+            device_map="auto",
+            load_in_8bit=True
         )
 
         self.model.to(self.device)
         finish_model_loading = time.time()
-        print(f"Model loaded in {finish_model_loading-start_model_loading} sec", file=sys.stderr)
+        print(f"BLIP2 Model loaded in {finish_model_loading-start_model_loading} sec", file=sys.stderr)
         
         self.generation_config = {
             "temperature": temperature,
@@ -59,7 +60,7 @@ class BLIP2Wrapper:
         finish_inference = time.time()
         total_time = finish_inference - start_inference
         if len(images) > 0 and total_time > 0.0:
-            print(f"BLIP2: Images procesed: n={len(images)} total_time={total_time} sec per_image={len(images)/total_time} sec", file=sys.stderr)
+            print(f"BLIP2: Images procesed: n={len(images)} total_time={total_time}sec  images_per_sec={len(images)/total_time}", file=sys.stderr)
         return results
 
 def main():
