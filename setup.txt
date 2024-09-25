@@ -13,3 +13,4 @@ pip install numpy
 pip install pillow
 pip install accelerate
 pip install nltk
+pip install bitsandbytes
