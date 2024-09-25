@@ -2,7 +2,7 @@ import sys
 import argparse
 import torch
 from PIL import Image
-from transformers import Blip2Processor, Blip2ForConditionalGeneration
+from transformers import Blip2Processor, Blip2ForConditionalGeneration, BitsAndBytesConfig
 import time
 import sys
 
@@ -17,6 +17,8 @@ class BLIP2Wrapper:
         self.model = None
         self.processor = None
         self.device = None
+        # Define the quantization configuration
+        self.quantization_config = BitsAndBytesConfig(load_in_8bit=True)
 
     def initialize(self, model_name="Salesforce/blip2-opt-2.7b", temperature=1.0, fp16=True, 
                    length_penalty=1.0, search_method="beam", num_beams=5, top_p=0.9):
@@ -28,10 +30,10 @@ class BLIP2Wrapper:
         self.model = Blip2ForConditionalGeneration.from_pretrained(
             model_name, 
             device_map="auto",
-            load_in_8bit=True
+            quantization_config=self.quantization_config
         )
 
-        self.model.to(self.device)
+        # not needed with "auto" # self.model.to(self.device)
         finish_model_loading = time.time()
         print(f"BLIP2 Model loaded in {finish_model_loading-start_model_loading} sec", file=sys.stderr)
         
@@ -41,20 +43,27 @@ class BLIP2Wrapper:
             "num_beams" if search_method == "beam" else "top_p": num_beams if search_method == "beam" else top_p,
         }
 
-    def image_to_text(self, images, batch_size=4, max_new_tokens=50):
+    def image_to_text(self, images, batch_size=4, max_new_tokens=20):
         results = []
         start_inference = time.time()
         for i in range(0, len(images), batch_size):
             batch = images[i:i+batch_size]
-            inputs = self.processor(images=batch, return_tensors="pt").to(self.device)
+            inputs = self.processor(images=batch, return_tensors="pt")  # auto takes care of #.to(self.device)
+            # Move inputs to the appropriate device if not managed by accelerate
+            #if self.device:  # not needed if using "auto" 
+                #inputs = {k: v.to(self.device) for k, v in inputs.items()}
             
             generated_ids = self.model.generate(
                 **inputs,
-                max_new_tokens=max_new_tokens,
-                **self.generation_config
+                #max_new_tokens=max_new_tokens,
+                max_length=max_new_tokens+1,
+                early_stopping=True,
+                **self.generation_config,
             )
             
-            generated_texts = self.processor.batch_decode(generated_ids, skip_special_tokens=True)
+            generated_texts = self.processor.batch_decode(generated_ids,
+                                                          skip_special_tokens=True,
+                                                          clean_up_tokenization_spaces=True)
             results.extend(generated_texts)
 
         finish_inference = time.time()
