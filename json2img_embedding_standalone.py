@@ -22,10 +22,11 @@ print(f"------->Device is {device}<------", file=sys.stderr)
 #  we mark the image as NSFW. (This is in addition to running a nsfw model on image.)
 nsfw_set = set("nude naked underwear panty panties thong breast breasts penis fuck fucked cock sexy sex ass dildo".split())
 
+skip_img2txt = True  # skip BLIP2 if True
 
-def detect_nsfw(s):
-  """Detects if a string contains any nsfw words."""
-  return any(word in nsfw_set for word in s.split())
+def detect_nsfw(words):
+    """Detects if a word in list contains any nsfw words."""
+    return any(word.lower() in nsfw_set for word in words)
 
 
 def process_jsonl_line(jsonl_string):
@@ -69,6 +70,51 @@ def extract_hashes_from_jsonl(file_path):
     # Return the set of unique hashes
     return hashes_set
 
+def validate_image(image: Image.Image, min_width: int = 6, min_height: int = 6, depth: int = 3) -> (bool, int, int):
+    """
+    Validates a PIL Image based on minimum width, height, and number of channels.
+            
+    Parameters:
+    - image (PIL.Image.Image): The image to validate.
+    - min_width (int): The minimum required width of the image in pixels. Default is 10.
+    - min_height (int): The minimum required height of the image in pixels. Default is 10.
+    - depth (int): The required number of channels in the image. Default is 3 (e.g., RGB).
+    return: bool: True if the image meets all the criteria, False otherwise.
+            plus width, height, channels ; channels will be -1 if not yet computed or not found.
+    """
+    # Check if the image is loaded properly
+    if image is None:
+        return False, 0, 0, -1
+    # Get image size (width, height)
+    width, height = image.size
+    # Check for minimum width and height
+    if width < min_width or height < min_height:
+        return False, width, height, -1
+    
+    # Determine the number of channels based on image mode
+    mode_to_channels = {
+        "1": 1,      # (1-bit pixels, black and white)
+        "L": 1,      # (8-bit pixels, black and white)
+        "P": 1,      # (8-bit pixels, mapped to any other mode using a color palette)
+        "RGB": 3,    # (3x8-bit pixels, true color)
+        "RGBA": 4,   # (4x8-bit pixels, true color with transparency mask)
+        "CMYK": 4,   # (4x8-bit pixels, color separation)
+        "YCbCr": 3,  # (3x8-bit pixels, color video format)
+        "I": 1,      # (32-bit signed integer pixels)
+        "F": 1       # (32-bit floating point pixels)
+    }
+    # Get the number of channels for the image's mode
+    channels = mode_to_channels.get(image.mode, None)
+    
+    # If the mode is unrecognized, consider the image invalid
+    if channels is None:
+        return False, width, height, -1
+    # Check if the number of channels matches the expected depth
+    if channels != depth:
+        return False, width, height, channels
+    # If all checks pass, the image is valid
+    return True, width, height, channels
+        
 
 def l2_normalize(embedding: torch.Tensor) -> torch.Tensor:
     """
@@ -155,21 +201,22 @@ def process_input_files(input_files, model_name, pretrained, output_file, k=3, n
     else:
         print("precision=fp32")
     finish_model_loading = time.time()
-    print(f"CLIP2 model loaded in {finish_model_loading-start_model_loading} sec", file=sys.stderr)
+    print(f"CLIP2 model loaded in {finish_model_loading-start_model_loading:.2f} sec", file=sys.stderr)
     print(f"clip2_model_name={model_name}  pretrained={pretrained}  k={k}  neighborhood_threshold={neighborhood_threshold}", file=sys.stderr)
 
     #
     #  Initialize BLIP2 for image->text
     #
     blip = img2txt_blip2.BLIP2Wrapper()
-    blip.initialize(
-        model_name="Salesforce/blip2-opt-2.7b",
-        temperature=1.0,
-        fp16=enable_fp16,
-        search_method="beam",
-        num_beams=5,
-        top_p=0.9
-    )
+    if not skip_img2txt:
+        blip.initialize(
+            model_name="Salesforce/blip2-opt-2.7b",
+            temperature=1.0,
+            fp16=enable_fp16,
+            search_method="beam",
+            num_beams=5,
+            top_p=0.9
+        )
 
     #
     # Initialize NSFW model
@@ -178,13 +225,13 @@ def process_input_files(input_files, model_name, pretrained, output_file, k=3, n
     nsfw_detector = NSFW.NSFW(batch_size=10, use_fp16=enable_fp16)
     nsfw_detector.initialize()
     finish_model_loading = time.time()
-    print(f"Falconsai/nsfw model loaded in {finish_model_loading-start_model_loading} sec", file=sys.stderr)
+    print(f"Falconsai/nsfw model loaded in {finish_model_loading-start_model_loading:.2f} sec", file=sys.stderr)
     
     if os.path.exists(output_file):
         previously_processed = extract_hashes_from_jsonl(output_file)
         print(f"will skip over {len(previously_processed)} previously processed gifs already in output")
     else:
-time.time()        previously_processed = set()
+        previously_processed = set()
 
     # Prepare for writing output
     output_jsonl = open(output_file, "a") if output_file else sys.stdout
@@ -219,12 +266,17 @@ time.time()        previously_processed = set()
                 if len(images) == 0:
                     continue
 
+                valid, w, h, chan = validate_image(images[0])
+                if not valid:
+                    print(f"skip image bad shape: hash: {hash_value} w={w} h={h} c={chan}", file=sys.stderr)
+                    continue # weird image (like 1 pixel high separator image), skip this gif
+
                 total_gifs_processed += 1
                 embeddings = []
                 batch_images = []
 
                 if enable_batching:
-                    # batch is entire list of images which is probably <100 with average size 10
+                    # batch is entire list of images for gif which is probably <100 with average len 10
                     total_images_processed += len(images)
                     # Preprocess all the images on cpu into batch_images list of tensors
                     for image in images:
@@ -269,39 +321,51 @@ time.time()        previously_processed = set()
                 selected_images = [images[i] for i in indices]
 
                 #  process all images for NSFW, taking max_nsfw_score
-                max_nsfw_score = max(nsfw_detector.process_images(images))
+                max_nsfw_score = max(nsfw_detector.process_images(images, hash_value))
 
-                #  run blip over images of selected embeddings
-                #   (selected_images is expected to be <=3)
-                captions = blip.image_to_text(selected_images, batch_size=3, max_new_tokens=50)
-                # deduplicate, remove high frequency words to get keywords
-                keywords = extractor.extract_keywords(" ".join(captions))
-                has_nsfw_kw = detect_nsfw(keywords)
+                if not skip_img2txt:
+                    #  run blip over images of selected embeddings
+                    #   (selected_images is expected to be <=3)
+                    captions = blip.image_to_text(selected_images, batch_size=3, max_new_tokens=50)
+                    # deduplicate, remove high frequency words to get keywords
+                    keywords = extractor.extract_keywords(" ".join(captions))
+                    has_nsfw_kw = detect_nsfw(keywords)
 
                 previously_processed.add(hash_value) # remember this to avoid duplicates
                 total_embeddings_saved += len(selected_embeddings)
-                if embedding_dimensions == 0 and len(selected_embeddings) > 0:
-                    embedding_dimensions = len(selected_embeddings[0])
-                for embedding in selected_embeddings:
-                    output = {
-                        "hash": hash_value,
-                        "embedding": embedding.tolist(),  # Convert tensor to list for JSON
-                        "mspec": f"{model_name}/{pretrained}", # in case we change the model/pretraining
-                        "mnsfw": max_nsfw_score,  # values in range [0.0,1.0]
-                        "knsfw": has_nsfw_kw, # boolean
-                        "keywords": keywords
-                    }
-                    print(json.dumps(output), file=output_jsonl)
-                    vector_count_by_hash[hash_value] += 1
+                embedding_dimensions = len(selected_embeddings[0]) #remember this to print out for ref
+                if skip_img2txt:
+                    for embedding in selected_embeddings:
+                        output = {
+                            "hash": hash_value,
+                            "embedding": embedding.tolist(),  # Convert tensor to list for JSON
+                            "mspec": f"{model_name}/{pretrained}", # in case we change the model/pretraining
+                            "mnsfw": max_nsfw_score,  # values in range [0.0,1.0]
+                        }
+                        print(json.dumps(output), file=output_jsonl)
+                        vector_count_by_hash[hash_value] += 1
+
+                else:
+                    for embedding in selected_embeddings:
+                        output = {
+                            "hash": hash_value,
+                            "embedding": embedding.tolist(),  # Convert tensor to list for JSON
+                            "mspec": f"{model_name}/{pretrained}", # in case we change the model/pretraining
+                            "mnsfw": max_nsfw_score,  # values in range [0.0,1.0]
+                            "knsfw": has_nsfw_kw, # boolean
+                            "keywords": keywords
+                        }
+                        print(json.dumps(output), file=output_jsonl)
+                        vector_count_by_hash[hash_value] += 1
 
     finish_processing = time.time()
     total_time = finish_processing-start_processing
     print(f"embedding_dimensions={embedding_dimensions}")
     print(f"Total gifs={total_gifs_processed}  images={total_images_processed}  total_embeddings={total_embeddings}  embeddings_saved={total_embeddings_saved}")
-    print(f"total_time_secs={total_time}")
+    print(f"total_time_secs={total_time:.2f}")
     if total_gifs_processed > 0:
-        print(f"gifs/sec={total_gifs_processed/total_time}  images/sec={total_images_processed/total_time}")
-        print(f"images per gif={total_images_processed/total_gifs_processed}  embeddings per gif={total_embeddings_saved/total_gifs_processed}")
+        print(f"gifs/sec={total_gifs_processed/total_time:.2f}  images/sec={total_images_processed/total_time}:.2f")
+        print(f"images per gif={total_images_processed/total_gifs_processed:.2f}  embeddings per gif={total_embeddings_saved/total_gifs_processed:.2f}")
 
     if output_file:
         output_jsonl.close()
@@ -310,7 +374,7 @@ time.time()        previously_processed = set()
     counts = list(vector_count_by_hash.values())
     max_count = max(counts) if counts else 1
     histogram = [counts.count(i) / len(counts) for i in range(1, max_count + 1)]
-    print("Histogram of vector counts by hash (normalized):", histogram)
+    print(f"Histogram of vector counts by hash (normalized): [{', '.join(f'{num:.2f}' for num in histogram)}]")
 
 if __name__ == "__main__":
     import argparse
