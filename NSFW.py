@@ -6,6 +6,7 @@ import sys
 import argparse
 from typing import List
 import os
+import numpy as np
 
 class NSFW:
     def __init__(self, batch_size: int = 32, use_fp16: bool = False):
@@ -20,23 +21,39 @@ class NSFW:
     def initialize(self):
         start_time = time.time()
         self.image_processor = AutoImageProcessor.from_pretrained(self.model_name)
+        # Debugging lines
+        print("Image Processor Configuration:", file=sys.stderr)
+        print("{self.image_processor}", file=sys.stderr)
+        print(f"Image Mean: {self.image_processor.image_mean}", file=sys.stderr)
+        print(f"Image Std: {self.image_processor.image_std}", file=sys.stderr)
+
         self.model = AutoModelForImageClassification.from_pretrained(self.model_name)
         self.model.to(self.device)
         if self.use_fp16 and self.device.type == "cuda":
             self.model.half()
-            print(f"nsfw model: fp16={self_fp16}  device={device}", file=sys.stderr)
+            print(f"nsfw model: fp16={self.use_fp16}  device={self.device}", file=sys.stderr)
         self.model.eval()
         finish_time = time.time()
         print(f"nsfw model loaded in {finish_time - start_time} seconds", file=sys.stderr)
 
 
-    def process_images(self, images: List[Image.Image]) -> List[float]:
+    def process_images(self, images: List[Image.Image], hash:str) -> List[float]:
         if self.model is None:
             raise RuntimeError("Model not initialized. Call initialize() first.")
 
         start_time = time.time()
         # Prepare inputs
-        inputs = self.image_processor(images, return_tensors="pt")
+        try: 
+            inputs = self.image_processor(images, return_tensors="pt")
+        except Exception as message:
+            print("\n", file=sys.stderr)
+            for idx, img in enumerate(images):
+                img_np = np.array(img)
+                print(f"NSFW.process_images(): image {idx + 1}/{len(images)} | Shape: {img_np.shape}", file=sys.stderr)
+            print(f"NSFW.process_images(hash={hash}): {message}", file=sys.stderr)
+            print("\n", file=sys.stderr)
+            return [0.0]
+
         if self.use_fp16:
             inputs = {k: v.half() for k, v in inputs.items()}
         inputs = {k: v.to(self.device) for k, v in inputs.items()} # move to gpu if using it
@@ -52,7 +69,7 @@ class NSFW:
         finish_time = time.time()
         total_time = finish_time - start_time
         avg_time_per_image = total_time / len(images)
-        print(f"Average nsfw processing time per image: {avg_time_per_image:.4f} seconds, file=sys.stderr")
+        #print(f"Average nsfw processing time per image: {avg_time_per_image:.4f} seconds", file=sys.stderr)
         return nsfw_scores
 
     
