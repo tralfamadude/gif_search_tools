@@ -20,6 +20,12 @@ Output (hash, embedding, mnsfw, knsfw, keywords)  where knsfw and keywords are o
 The output will be 1-k embedding lines per input gif. 
 
 The normalized embeddings are suitable for vector (semantic) search when queries are processed by query_to_vector.py.
+
+Command line args specify an output file for the jsonl.
+Info about performance goes to stderr, including messages of hashes that correspond to corrupted GIFs.
+
+Models are from huggingface.co.
+
 """
 
 
@@ -88,17 +94,19 @@ def extract_hashes_from_jsonl(file_path):
     hashes_set = set()  # Set to store unique hashes
     
     # Open the jsonl file and process each line
+    lineno = 0
     with open(file_path, 'r') as file:
         for line in file:
+            lineno += 1
             try:
                 # Parse each line as JSON
                 data = json.loads(line)
                 # Add the hash value to the set if it exists
                 if 'hash' in data:
                     hashes_set.add(data['hash'])
-            except json.JSONDecodeError:
+            except json.JSONDecodeError as message:
                 # Handle JSON parsing error if any line is not valid JSON
-                print(f"Error parsing jsonl line")
+                print(f"Error parsing jsonl line file={file_path} line={lineno} message={message}", file=sys.stderr)
     
     # Return the set of unique hashes
     return hashes_set
@@ -246,9 +254,9 @@ def process_input_files(input_files, model_name, pretrained, output_file, k=3, n
     model = model.to(device).eval()
     if enable_fp16:
         model.half()
-        print("precision=fp16")
+        print("precision=fp16", file=sys.stderr)
     else:
-        print("precision=fp32")
+        print("precision=fp32", file=sys.stderr)
     finish_model_loading = time.time()
     print(f"CLIP2 model loaded in {finish_model_loading-start_model_loading:.2f} sec", file=sys.stderr)
     print(f"clip2_model_name={model_name}  pretrained={pretrained}  k={k}  neighborhood_threshold={neighborhood_threshold}", file=sys.stderr)
@@ -278,7 +286,7 @@ def process_input_files(input_files, model_name, pretrained, output_file, k=3, n
     
     if os.path.exists(output_file):
         previously_processed = extract_hashes_from_jsonl(output_file)
-        print(f"will skip over {len(previously_processed)} previously processed gifs already in output")
+        print(f"will skip over {len(previously_processed)} previously processed gifs already in output", file=sys.stderr)
     else:
         previously_processed = set()
 
@@ -408,12 +416,12 @@ def process_input_files(input_files, model_name, pretrained, output_file, k=3, n
 
     finish_processing = time.time()
     total_time = finish_processing-start_processing
-    print(f"embedding_dimensions={embedding_dimensions}")
-    print(f"Total gifs={total_gifs_processed}  images={total_images_processed}  total_embeddings={total_embeddings}  embeddings_saved={total_embeddings_saved}")
-    print(f"total_time_secs={total_time:.2f}")
+    print(f"embedding_dimensions={embedding_dimensions}", file=sys.stderr)
+    print(f"Total gifs={total_gifs_processed}  images={total_images_processed}  total_embeddings={total_embeddings}  embeddings_saved={total_embeddings_saved}", file=sys.stderr)
+    print(f"total_time_secs={total_time:.2f}", file=sys.stderr)
     if total_gifs_processed > 0:
-        print(f"gifs/sec={total_gifs_processed/total_time:.2f}  images/sec={total_images_processed/total_time}:.2f")
-        print(f"images per gif={total_images_processed/total_gifs_processed:.2f}  embeddings per gif={total_embeddings_saved/total_gifs_processed:.2f}")
+        print(f"gifs/sec={total_gifs_processed/total_time:.2f}  images/sec={total_images_processed/total_time}:.2f", file=sys.stderr)
+        print(f"images per gif={total_images_processed/total_gifs_processed:.2f}  embeddings per gif={total_embeddings_saved/total_gifs_processed:.2f}", file=sys.stderr)
 
     if output_file:
         output_jsonl.close()
@@ -422,7 +430,7 @@ def process_input_files(input_files, model_name, pretrained, output_file, k=3, n
     counts = list(vector_count_by_hash.values())
     max_count = max(counts) if counts else 1
     histogram = [counts.count(i) / len(counts) for i in range(1, max_count + 1)]
-    print(f"Histogram of vector counts by hash (normalized): [{', '.join(f'{num:.2f}' for num in histogram)}]")
+    print(f"Histogram of vector counts by hash (normalized): [{', '.join(f'{num:.2f}' for num in histogram)}]", file=sys.stderr)
 
 if __name__ == "__main__":
     import argparse
