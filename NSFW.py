@@ -12,6 +12,7 @@ import numpy as np
 Class to process images with Falconsai nsfw model to get a score for images [0.0, 1.0].
 
 Model is from huggingface.co.
+Only emits error and performance message to stderr (not stdout). 
 """
 
 class NSFW:
