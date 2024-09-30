@@ -23,7 +23,7 @@ class NSFW:
         self.image_processor = AutoImageProcessor.from_pretrained(self.model_name)
         # Debugging lines
         print("Image Processor Configuration:", file=sys.stderr)
-        print("{self.image_processor}", file=sys.stderr)
+        print(f"{self.image_processor}", file=sys.stderr)
         print(f"Image Mean: {self.image_processor.image_mean}", file=sys.stderr)
         print(f"Image Std: {self.image_processor.image_std}", file=sys.stderr)
 
