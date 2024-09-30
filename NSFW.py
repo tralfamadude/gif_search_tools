@@ -8,6 +8,12 @@ from typing import List
 import os
 import numpy as np
 
+"""
+Class to process images with Falconsai nsfw model to get a score for images [0.0, 1.0].
+
+Model is from huggingface.co.
+"""
+
 class NSFW:
     def __init__(self, batch_size: int = 32, use_fp16: bool = False):
         self.model_name = "Falconsai/nsfw_image_detection"
@@ -19,6 +25,10 @@ class NSFW:
 
         
     def initialize(self):
+        """
+        Load model and processor. 
+        Returns: None.
+        """
         start_time = time.time()
         self.image_processor = AutoImageProcessor.from_pretrained(self.model_name)
         # Debugging lines
@@ -38,6 +48,11 @@ class NSFW:
 
 
     def process_images(self, images: List[Image.Image], hash:str) -> List[float]:
+        """
+        Process given list of images and return a corresponding list of floats. 
+        images: list of PIL.Image
+        hash: associated file or id used only for error messages. 
+        """
         if self.model is None:
             raise RuntimeError("Model not initialized. Call initialize() first.")
 
@@ -74,6 +89,10 @@ class NSFW:
 
     
     def process_image_paths(self, image_paths: List[str]) -> List[float]:
+        """
+        Convenience function to process a list of images in the file system. 
+        Useful for testing. 
+        """
         if self.model is None:
             raise RuntimeError("Model not initialized. Call initialize() first.")
 
