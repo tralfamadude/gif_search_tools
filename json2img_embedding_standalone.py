@@ -14,6 +14,15 @@ import img2txt_blip2
 import NSFW
 import keyword_extractor
 
+"""
+Process jsonl files with (hash, gifb64) that is, a hash or other unique identifier and a base64 encode GIF file. 
+Output (hash, embedding, mnsfw, knsfw, keywords)  where knsfw and keywords are only if BLIP2 is enabled.
+The output will be 1-k embedding lines per input gif. 
+
+The normalized embeddings are suitable for vector (semantic) search when queries are processed by query_to_vector.py.
+"""
+
+
 
 device = "cuda" if torch.cuda.is_available() else "cpu"
 print(f"------->Device is {device}<------", file=sys.stderr)
@@ -23,6 +32,10 @@ print(f"------->Device is {device}<------", file=sys.stderr)
 nsfw_set = set("nude naked underwear panty panties thong breast breasts penis fuck fucked cock sexy sex ass dildo".split())
 
 skip_img2txt = True  # skip BLIP2 if True
+
+"""
+The 2.7g BLIP2 (image->text) model is slow. Expect 0.5 seconds per image on GPU. 
+"""
 
 def detect_nsfw(words):
     """
@@ -342,7 +355,7 @@ def process_input_files(input_files, model_name, pretrained, output_file, k=3, n
                             image_embedding = model.encode_image(image_tensor).squeeze(0)  # Remove batch dimension
                             image_embedding = l2_normalize(image_embedding)
                             embeddings.append(image_embedding.cpu().numpy())
-                # postcondition: now we have (images) and corresponding (embeddings in numpy)
+                # postcondition: now we have (images) and corresponding embeddings (in numpy)
 
                 total_embeddings += len(embeddings)
                 
@@ -418,21 +431,12 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Process images in GIFs, generate embeddings using OpenCLIP, and output results.")
     parser.add_argument("input_files", nargs="+", help="Input JSONL files containing image data")
     parser.add_argument("--output_file", required=True, help="Destination file for JSONL output")
-    parser.add_argument("--model_name", default="ViT-B-32", help="Model name for OpenCLIP (default: ViT-B-32)")
-    parser.add_argument("--pretrained", default="laion2b_s34b_b79k", help="Pretrained weights for OpenCLIP (default: laion2b_s34b_b79k)")
+    parser.add_argument("--model_name", default="ViT-L-14", help="Model name for OpenCLIP (default: ViT-L-14)")
+    parser.add_argument("--pretrained", default="laion2b_s32b_b82k", help="Pretrained weights for OpenCLIP (default: laion2b_s34b_b79k)")
     parser.add_argument("--k", type=int, default=3, help="Number of clusters/vectors to select (default: 3)")
     parser.add_argument("--neighborhood_threshold", type=float, default=0.05, help="Minimum cosine distance between vectors (default: 0.05)")
 
     args = parser.parse_args()
 
-    #profiler = LineProfiler()
-    #profiler.add_function(process_input_files)
-    #profiler.add_function(extract_images_from_gif)
-    #profiler.add_function(extract_hashes_from_jsonl)
-    #profiler.add_function(most_different_vectors)
-    #profile_wrapper = profiler(process_input_files)
-    # Process input files and output results
-    #profile_wrapper(args.input_files, args.model_name, args.pretrained, args.output_file, args.k, args.neighborhood_threshold)
     process_input_files(args.input_files, args.model_name, args.pretrained, args.output_file, args.k, args.neighborhood_threshold)
-    #profiler.print_stats()
 
