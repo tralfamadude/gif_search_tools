@@ -25,11 +25,19 @@ nsfw_set = set("nude naked underwear panty panties thong breast breasts penis fu
 skip_img2txt = True  # skip BLIP2 if True
 
 def detect_nsfw(words):
-    """Detects if a word in list contains any nsfw words."""
+    """
+    Detects if a word in list contains any nsfw words.
+    words: a list of words
+    Returns: True if words contains any words on the nsfw list above, indicative of possible nsfw image. 
+    """
     return any(word.lower() in nsfw_set for word in words)
 
 
 def process_jsonl_line(jsonl_string):
+    """
+    jsonl_string: a json string for a dict, with keys "hash" (could be file name, whatever) and "gifb64" (base64).
+    Returns: (hash, gif-binary) 
+    """
     data = json.loads(jsonl_string)
     hash_value = data.get("hash")
     gif_base64 = data.get("gifb64")
@@ -38,6 +46,12 @@ def process_jsonl_line(jsonl_string):
 
 
 def extract_images_from_gif(gif_binary, hash=""):
+    """
+    Extract images from a GIF.
+    git_binary: the bytes of a GIF file.
+    hash: optional associated hash, only for error messages. 
+    Returns: list of images (PIL Image) from the given GIF. 
+    """
     images = []
     try:
         with Image.open(BytesIO(gif_binary)) as img:
@@ -52,6 +66,12 @@ def extract_images_from_gif(gif_binary, hash=""):
 
 
 def extract_hashes_from_jsonl(file_path):
+    """
+    Read the output file to make a note of what GIFs have already been processed and skip over them,
+    just in case this is a restart. 
+    Returns: set() containing hashes of GIFs that have been processed already. 
+    """
+    
     hashes_set = set()  # Set to store unique hashes
     
     # Open the jsonl file and process each line
@@ -70,9 +90,12 @@ def extract_hashes_from_jsonl(file_path):
     # Return the set of unique hashes
     return hashes_set
 
+
 def validate_image(image: Image.Image, min_width: int = 6, min_height: int = 6, depth: int = 3) -> (bool, int, int):
     """
-    Validates a PIL Image based on minimum width, height, and number of channels.
+    Validates a PIL Image based on minimum width, height, and number of channels. Some images are not
+    worth processing because they are too small to represent something. Example: animated separators 
+    which are 1 pixel high. 
             
     Parameters:
     - image (PIL.Image.Image): The image to validate.
@@ -118,7 +141,8 @@ def validate_image(image: Image.Image, min_width: int = 6, min_height: int = 6, 
 
 def l2_normalize(embedding: torch.Tensor) -> torch.Tensor:
     """
-    return: normalized tensor (1D or 2D)
+    embedding: a pytorch tensor.
+    return: normalized tensor (1D or 2D).
     """
     norm = embedding.norm(p=2, dim=-1, keepdim=True)
     
@@ -185,6 +209,18 @@ def most_different_vectors(vector_list, k=3, threshold=0.05):
 
 
 def process_input_files(input_files, model_name, pretrained, output_file, k=3, neighborhood_threshold=0.05):
+    """
+    a. Read 1 line at a time from input_files with 1 json per line ("jsonl" format)
+    b. extract GIF from the json (base64 encoded) 
+    c. get the associated hash. 
+    d. Then explode the gif into individual images
+    e. process images by OpenCLIP to get embeddings
+    f. find the most different k embeddings
+    g. process every image in a gif for nsfw score, emitting the maximum value for a gif.
+    h. optionally process the selected images with BLIP2 to get a caption and use that as keywords
+    i. if the keywords from BLIP2 are indicative of nsfw, then note that as a key separate from the nsfw model score.
+    j. emit 1 line of json for the gif
+    """
     enable_batching = True
     enable_fp16 = True
 
@@ -238,7 +274,6 @@ def process_input_files(input_files, model_name, pretrained, output_file, k=3, n
     vector_count_by_hash = defaultdict(int)
     print(f"Input file count={len(input_files)}", file=sys.stderr)
     extractor = keyword_extractor.KeywordExtractor()
-
     
     embedding_dimensions = 0
     total_gifs_processed = 0
