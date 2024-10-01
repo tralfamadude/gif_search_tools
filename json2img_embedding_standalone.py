@@ -16,7 +16,8 @@ import keyword_extractor
 
 """
 Process jsonl files with (hash, gifb64) that is, a hash or other unique identifier and a base64 encode GIF file. 
-Output (hash, embedding, mnsfw, knsfw, keywords)  where knsfw and keywords are only if BLIP2 is enabled.
+Output (hash, embedding, mspec, mnsfw, knsfw, keywords)  where knsfw and keywords are only if BLIP2 is enabled.
+The key "mspec" is a way to note the model used (good to keep track so that queries use the same model.)
 The output will be 1-k embedding lines per input gif. 
 
 The normalized embeddings are suitable for vector (semantic) search when queries are processed by query_to_vector.py.
@@ -27,7 +28,6 @@ Info about performance goes to stderr, including messages of hashes that corresp
 Models are from huggingface.co.
 
 """
-
 
 
 device = "cuda" if torch.cuda.is_available() else "cpu"
@@ -381,7 +381,7 @@ def process_input_files(input_files, model_name, pretrained, output_file, k=3, n
 
                 if not skip_img2txt:
                     #  run blip over images of selected embeddings
-                    #   (selected_images is expected to be <=3)
+                    #   (selected_images is expected to be <=k)
                     captions = blip.image_to_text(selected_images, batch_size=3, max_new_tokens=50)
                     # deduplicate, remove high frequency words to get keywords
                     keywords = extractor.extract_keywords(" ".join(captions))
