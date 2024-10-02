@@ -1,3 +1,4 @@
+import os
 import sys
 import argparse
 import torch
@@ -18,14 +19,13 @@ class BLIP2Wrapper:
     def __init__(self):
         self.model = None
         self.processor = None
-        self.device = None
+        self.device = "cuda" if torch.cuda.is_available() else "cpu"
         # Define the quantization configuration
         self.quantization_config = BitsAndBytesConfig(load_in_8bit=True)
 
     
-    def initialize(self, model_name, model_path=None, temperature=1.0, fp16=True, 
+    def initialize(self, model_name=None, model_path=None, temperature=1.0, fp16=True, 
                    length_penalty=1.0, search_method="beam", num_beams=5, top_p=0.9):
-        self.device = "cuda" if torch.cuda.is_available() else "cpu"
         print(f"Using device: {self.device}")
 
         start_model_loading = time.time()
@@ -76,7 +76,7 @@ class BLIP2Wrapper:
 
     def save_model_to_local(self, model, dest_file_path):
         # Load model and processor from huggingface hub and save to local destination
-        print(f"Saving model {model_name} with pretraining {pretraining_name} to {dest_file_path}")
+        print(f"Saving model {model} to {dest_file_path}")
         processor = Blip2Processor.from_pretrained(model)
         model = Blip2ForConditionalGeneration.from_pretrained(model)
 
@@ -102,7 +102,7 @@ def main():
         description="BLIP-2 Image to Text",
         epilog="If both model and model_path are specified, Load model from hugging face, save in local fs"
     )
-    parser.add_argument("--model", default="Salesforce/blip2-opt-2.7b", help="BLIP-2 model name")
+    parser.add_argument("--model", default="", help="BLIP-2 model name, example: Salesforce/blip2-opt-2.7b")
     parser.add_argument("--model_path", default="", help="directory to local saved BLIP2")
     parser.add_argument("--temperature", type=float, default=1.0, help="Generation temperature")
     parser.add_argument("--fp16", action="store_true", help="Use FP16 precision")
@@ -126,7 +126,7 @@ def main():
         print("Load model from hugging face, save in local fs...")
         if not os.path.exists(local_path):
             os.makedirs(local_path)
-        save_model_to_local(args.model, local_path)
+        blip2_wrapper.save_model_to_local(model=args.model, dest_file_path=local_path)
         sys.exit(0)
             
     if args.model_path != "":
@@ -141,7 +141,7 @@ def main():
             top_p=args.top_p
         )
     else:
-        print(f"Get BLIP2 from huggingface: {model}")
+        print(f"Get BLIP2 from huggingface: {args.model}")
         blip2_wrapper.initialize(
             model_name=args.model,
             temperature=args.temperature,
