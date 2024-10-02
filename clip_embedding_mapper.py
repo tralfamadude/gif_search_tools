@@ -376,6 +376,9 @@ def process_input_files(model_path, k=3, neighborhood_threshold=0.08, blip2_mode
         previously_processed.add(hash_value) # remember this to avoid duplicates
         total_embeddings_saved += len(selected_embeddings)
         embedding_dimensions = len(selected_embeddings[0]) #remember this to print out for ref
+        #
+        # outpt each selected embedding as its own jsonl line
+        #
         if skip_img2txt:
             for embedding in selected_embeddings:
                 output = {
