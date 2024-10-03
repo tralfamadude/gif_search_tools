@@ -2,6 +2,9 @@ Utilities and batch jobs to support GIF semantic search. The main jobs are json2
 
 This was used to support GIF semantic search at Internet Archive. 
 
+The json2img_embedding_standalone.py job can apply 3 neural networks on millions of GIFs. OpenCLIP is used to get embeddings, Falsonsai/nsfw is used for image->nsfw rating, and BLIP2 is used to get keywords which can be used for augemting search and as another nsfw metric if specific naughty words are present.
+
+In practice, we did not use BLIP2 because it processes images on our Nvidia L4 GPU at the rate of 1.7/sec; that is the long pole in the tent since OpenCLIP works around 75 images/sec. We ran this on 1.5M GIFs on 3 GPUs for about 24hr; if we used BLIIP2, it would take a month or more even when run with 8bit weights and fp16. If the 2.7b BLIP2 model were distilled into a smaller model, perhaps it would work nearly as well and be much faster.
 
 
 | File                                | Purpose                                                     |
@@ -20,4 +23,5 @@ This was used to support GIF semantic search at Internet Archive.
 | select_representative_vectors_test.py| Another most different vectors test using KMeans            |
 | topk_vectors_test.py                | Find representative vectors with KMeans, scipy cosine        |
 | verify_clip_model_load.py           | Utility to verify that OpenCLIP model in local fs is good    |
+| run.sh                              | How I ran the standalone job                                 |
 
