@@ -1,31 +1,33 @@
 import open_clip
 import torch
 import os
+import argparse
 
-# Define the model name and Hugging Face hub path
-model_name = "ViT-L-14"
-pretrained = "laion2b_s32b_b82k"
-# Define a local path where the model will be saved
-save_dir = os.path.expanduser("saved_openclip_model")
+def main(model_name, pretrained, save_dir):
+    # Load the model from Hugging Face Hub
+    model, _, preprocess = open_clip.create_model_and_transforms(model_name, pretrained)
 
-# Load the model from Hugging Face Hub
-model, _, preprocess = open_clip.create_model_and_transforms(model_name, pretrained)
+    # Create the directory if it doesn't exist
+    if not os.path.exists(save_dir):
+        os.makedirs(save_dir)
 
+    model_save_path = os.path.join(save_dir, f"openclip_{model_name.lower().replace('-', '_')}_{pretrained}.pth")
+    torch.save(model.state_dict(), model_save_path)
+    print(f"Model saved locally at {model_save_path}")
 
-# Create the directory if it doesn't exist
-if not os.path.exists(save_dir):
-    os.makedirs(save_dir)
+    pp_path = os.path.join(save_dir, "preprocess.pth")
+    torch.save(preprocess, pp_path)
+    print(f"Preprocessing saved locally under {pp_path}.")
 
-# Save the model state dict locally
-model_save_path = os.path.join(save_dir, "openclip_vit_l_14_laion2b_s32b_b82k.pth")
-torch.save(model.state_dict(), model_save_path)
+    
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="Download and save OpenCLIP model locally.\nThe destination directory will be created if it doesn't exist.")
+    parser.add_argument("--model", default="ViT-L-14", help="Model name (default: ViT-L-14)")
+    parser.add_argument("--pretrained", default="laion2b_s32b_b82k", help="Pretrained spec (default: laion2b_s32b_b82k)")
+    parser.add_argument("--save_dir", default="saved_openclip_model", help="Destination directory for saving the model (default: ~/saved_openclip_model)")
 
-print(f"Model saved locally at {model_save_path}")
+    args = parser.parse_args()
 
-pp_path = os.path.join(save_dir, "preprocess.pth")
-# You can also save the preprocess function's info, if needed
-# (For this example, we assume it is being saved for reuse, but adjust as necessary)
-torch.save(preprocess, pp_path)
+    main(args.model, args.pretrained, os.path.expanduser(args.save_dir))
 
-print(f"Preprocessing saved locally under {pp_path}.")
-
+    
