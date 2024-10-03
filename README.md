@@ -15,11 +15,9 @@ This was used to support GIF semantic search at Internet Archive.
 | json2img_embedding_standalone.py    | The main job for image->embedding, keywords                  |
 | jsonl_to_gifs.py                    | Utility to extract GIFs from jsonl                           |
 | keyword_extractor.py                | Class to help find keywords from captions, remove stop words |
-| most_different_vectors_test.py      | Test of using KMeans to find most different vectors          |
+| most_different_vectors_test.py      | Comprehensive test of most different vectors, used this for production |
 | query_to_vector.py                  | QueryEmbedding class to convert a query to an embedding      |
-| select_representative_vectors_test.py| Another most different vectors test                         |
-| similar_vector_set_test.py          | Check to see if all vectors in a list are similar            |
-| similar_vectors_test.py             | Check to see if all vectors in a list are similar            |
-| topk_vectors_test.py                | Find representative vectors with KMeans                      |
+| select_representative_vectors_test.py| Another most different vectors test using KMeans            |
+| topk_vectors_test.py                | Find representative vectors with KMeans, scipy cosine        |
 | verify_clip_model_load.py           | Utility to verify that OpenCLIP model in local fs is good    |
 
