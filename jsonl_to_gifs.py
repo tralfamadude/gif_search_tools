@@ -21,7 +21,7 @@ def process_jsonl_line(jsonl_string):
 def main():
     # Ensure the destination directory is provided as a command-line argument
     if len(sys.argv) != 2:
-        print("Usage: python script.py <destination_directory>")
+        print("Usage: python jsonl_to_gifs.py <destination_directory>\nRead stdin and extracts GIF from jsonl file")
         sys.exit(1)
     
     # Get the destination directory from the command line
