@@ -31,7 +31,7 @@ a model that takes an image and produces a caption. The output will be k or fewe
 input gif. (k default is 3.)
 
 The embeddings are normalized and suitable for vector (semantic) search when queries are processed by 
-query_to_vector.py which MUST use the same OpenCLIP model. To avoid mixups, the output from this
+query_to_vector.py which MUST use the same OpenCLIP model+pretraining. To avoid mixups, the output from this
 has the key "mspec" to identify the embedding model. 
 
 The jsonl output goes to stdout. 
@@ -40,16 +40,21 @@ Info about performance or errors goes to stderr, including messages of hashes th
 which were skipped over. GIFs that are too small for any practical inference are also skipped and that is 
 noted in stderr too. 
 
-Models are from huggingface.co, but we move them to local fs, dir is specified on command line. 
+Models are from huggingface.co, but we move them to local fs with clip_to_local.py and img2txt_blip2.py, 
+dir is specified on command line. 
 
 To move the models to the local fs:
 
-python clip_to_local.py 
+# OpenCLIP:
+python clip_to_local.py --model ViT-L-14 --pretrained laion2b_s32b_b82k --save_dir /local/path/clip
+
+# BLIP2:
 python img2txt_blip2.py --model_path Salesforce/blip2-opt-2.7b --model_path /local/path/blip2
 
 
-To use BLIP2 to generate captions from images which are then used to make keywords, the model must 
-be saved to disk inst
+To use BLIP2 to generate captions from images which are then used to make keywords, just specify
+the dir. for that downloaded model. By default, BLIIP2 is not used due to low throughput (about 1.7 images per
+second).  Clip processing is required. 
 """
 
 
@@ -503,8 +508,5 @@ if __name__ == "__main__":
     if args.blip2_model_path != "":
         skip_img2txt = False
 
-    process_jsonl(os.path.expanduser(args.model_path), k=args.k, neighborhood_threshold=args.neighborhood_threshold)
-
-
-
+    process_jsonl(os.path.expanduser(args.model_path), blip2_model_path=args.blip2_model_path, k=args.k, neighborhood_threshold=args.neighborhood_threshold)
 
