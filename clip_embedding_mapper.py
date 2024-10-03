@@ -23,19 +23,33 @@ from nltk.corpus import stopwords
 
 
 """
-Process jsonl from stdin with json (hash, gifb64) that is, a hash or other unique identifier and 
-a base64 encoded GIF file. 
+This will process jsonl from stdin with json (hash, gifb64) that is, where hash is a unique identifier for the 
+base64 encoded GIF file. 
 
-Output (hash, embedding, keywords)  where keywords is present only if BLIP2 is enabled.
-The output will be 1-k embedding lines per input gif. (k default is 3.)
+The output is (hash, embedding, keywords)  where keywords is present only if BLIP2 is enabled. BLIP2 is 
+a model that takes an image and produces a caption. The output will be k or fewer embedding lines per 
+input gif. (k default is 3.)
 
-The normalized embeddings are suitable for vector (semantic) search when queries are processed by query_to_vector.py using the same OpenCLIP model.
+The embeddings are normalized and suitable for vector (semantic) search when queries are processed by 
+query_to_vector.py which MUST use the same OpenCLIP model. To avoid mixups, the output from this
+has the key "mspec" to identify the embedding model. 
 
 The jsonl output goes to stdout. 
-Info about performance goes to stderr, including messages of hashes that correspond to corrupted GIFs.
 
-Models are from huggingface.co, but we move them to local fs, dir is specified on command line.
+Info about performance or errors goes to stderr, including messages of hashes that correspond to corrupted GIFs
+which were skipped over. GIFs that are too small for any practical inference are also skipped and that is 
+noted in stderr too. 
 
+Models are from huggingface.co, but we move them to local fs, dir is specified on command line. 
+
+To move the models to the local fs:
+
+python clip_to_local.py 
+python img2txt_blip2.py --model_path Salesforce/blip2-opt-2.7b --model_path /local/path/blip2
+
+
+To use BLIP2 to generate captions from images which are then used to make keywords, the model must 
+be saved to disk inst
 """
 
 
@@ -280,7 +294,7 @@ def most_different_vectors(vector_list, k=3, threshold=0.05):
     return results, selected
 
 
-def process_input_files(model_path, blip2_model_path="", k=3, neighborhood_threshold=0.08):
+def process_jsonl(model_path, blip2_model_path="", k=3, neighborhood_threshold=0.08):
     """
     a. Read 1 line at a time from stdin  with 1 json per line ("jsonl" format)
     b. extract GIF from the json (base64 encoded) 
@@ -299,13 +313,13 @@ def process_input_files(model_path, blip2_model_path="", k=3, neighborhood_thres
     # Initialize OpenCLIP model for image->embedding
     #
     start_model_loading = time.time()
-    print("Initialize OpenCLIP model with pretraing dir={model_path}", file=sys.stderr)
+    print(f"Initialize OpenCLIP model with pretraing dir={model_path}", file=sys.stderr)
     model_file_path = os.path.join(model_path, "openclip_vit_l_14_laion2b_s32b_b82k.pth")
     preprocess_file_path = os.path.join(model_path, "preprocess.pth")
     short_model_name = os.path.basename(model_file_path)
     precision = 'fp16' if enable_fp16 and device == 'cuda' else 'fp32'
-    print("model_file_path={model_file_path}", file=sys.stderr)
-    print("preprocess_file_path={preprocess_file_path}", file=sys.stderr)
+    print(f"model_file_path={model_file_path}", file=sys.stderr)
+    print(f"preprocess_file_path={preprocess_file_path}", file=sys.stderr)
 
     try:
         # first we create the empty model on device, then load the parameters
@@ -386,7 +400,7 @@ def process_input_files(model_path, blip2_model_path="", k=3, neighborhood_thres
             embeddings_list = []
             for i in range(0, len(images), clip_batch_size):  # batches within batches
                 # Select a batch of m images
-                batch = images[i:i+m]
+                batch = images[i:i+clip_batch_size]
                 # Preprocess the batch of images
                 batch_images = [preprocess(image).unsqueeze(0) for image in batch]
                 # Concatenate the batch of tensors into a single tensor
@@ -435,7 +449,6 @@ def process_input_files(model_path, blip2_model_path="", k=3, neighborhood_thres
             if len(captions) > 0:
                 keywords = extractor.extract_keywords(" ".join(captions))
 
-        previously_processed.add(hash_value) # remember this to avoid duplicates
         total_embeddings_saved += len(selected_embeddings)
         embedding_dimensions = len(selected_embeddings[0]) #remember this to print out for ref
         #
@@ -467,7 +480,7 @@ def process_input_files(model_path, blip2_model_path="", k=3, neighborhood_thres
     print(f"Total gifs={total_gifs_processed}  images={total_images_processed}  total_embeddings={total_embeddings}  embeddings_saved={total_embeddings_saved}", file=sys.stderr)
     print(f"total_time_secs={total_time:.2f}", file=sys.stderr)
     if total_gifs_processed > 0:
-        print(f"gifs/sec={total_gifs_processed/total_time:.2f}  images/sec={total_images_processed/total_time}:.2f", file=sys.stderr)
+        print(f"gifs/sec={total_gifs_processed/total_time:.2f}  images/sec={total_images_processed/total_time:.2f}", file=sys.stderr)
         print(f"images per gif={total_images_processed/total_gifs_processed:.2f}  embeddings per gif={total_embeddings_saved/total_gifs_processed:.2f}", file=sys.stderr)
 
 
@@ -481,7 +494,6 @@ if __name__ == "__main__":
 
     # Parse command-line arguments
     parser = argparse.ArgumentParser(description="Process images in GIFs, generate embeddings using OpenCLIP, \nand output results. Must specify model_path and optionally blip2_model_path")
-    parser.add_argument("input_files", nargs="+", help="Input JSONL files containing image data")
     parser.add_argument("--model_path", help="path to OpenCLIP model directory with preprocess info in preprocess.pth")
     parser.add_argument("--blip2_model_path", default="", help="path to BLIP2 model directory with preprocess info in preprocess.pth")
     parser.add_argument("--k", type=int, default=3, help="Number of clusters/vectors to select (default: 3)")
@@ -491,7 +503,7 @@ if __name__ == "__main__":
     if args.blip2_model_path != "":
         skip_img2txt = False
 
-    process_input_files(os.path.expanduser(args.model_path), args.k, args.neighborhood_threshold)
+    process_jsonl(os.path.expanduser(args.model_path), k=args.k, neighborhood_threshold=args.neighborhood_threshold)
 
 
 
