@@ -12,7 +12,6 @@ import time
 """
 Image Captioning using BLIP-2.
 
-Model is cached under ~/.cache; to change that, set env var TRANSFORMERS_CACHE.
 """
 
 class BLIP2Wrapper:
@@ -49,6 +48,12 @@ class BLIP2Wrapper:
 
         
     def image_to_text(self, images, batch_size=4, max_new_tokens=20):
+        """
+        Analyze list of images.
+        images: list of PIL.Image to get captions.
+        batch_size: how many images to send to blip2 at a time.
+        Returns: list of string captions, possibly empty if image is too small.
+        """
         results = []
         start_inference = time.time()
         for i in range(0, len(images), batch_size):
