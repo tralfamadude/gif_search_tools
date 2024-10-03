@@ -1,13 +1,16 @@
 #!/usr/bin/env python3
 import sys
 import os
+import argparse
 import json
+import requests
 import torch
 import torch.cuda
 import base64
 from PIL import Image
 from io import BytesIO
 import open_clip
+from transformers import Blip2Processor, Blip2ForConditionalGeneration, BitsAndBytesConfig
 from collections import defaultdict
 import time
 import numpy as np
@@ -39,11 +42,66 @@ Models are from huggingface.co, but we move them to local fs, dir is specified o
 device = "cuda" if torch.cuda.is_available() else "cpu"
 print(f"------->Device is {device}<------", file=sys.stderr)
 
-skip_img2txt = True  # skip BLIP2 if True
+# The 2.7g BLIP2 (image->text) model is slow. Expect 0.5 seconds per image on GPU. 
+skip_img2txt = True  # skip BLIP2 if True 
 
-"""
-The 2.7g BLIP2 (image->text) model is slow. Expect 0.5 seconds per image on GPU. 
-"""
+
+class BLIP2Wrapper:
+    def __init__(self):
+        self.model = None
+        self.processor = None
+        self.device = "cuda" if torch.cuda.is_available() else "cpu"
+        # Define the quantization configuration
+        self.quantization_config = BitsAndBytesConfig(load_in_8bit=True)
+
+    
+    def initialize(self, model_name=None, model_path=None, temperature=1.0, fp16=True, 
+                   length_penalty=1.0, search_method="beam", num_beams=5, top_p=0.9):
+        start_model_loading = time.time()
+        # Load from local path if provided, else from Hugging Face Hub
+        self.processor = Blip2Processor.from_pretrained(model_path if model_path else model_name)
+        self.model = Blip2ForConditionalGeneration.from_pretrained(
+            model_path if model_path else model_name,
+            device_map="auto",
+            quantization_config=self.quantization_config,
+            torch_dtype=torch.float16 if fp16 else torch.float32,
+        )
+
+        finish_model_loading = time.time()
+        print(f"BLIP2 Model loaded in {finish_model_loading-start_model_loading} sec", file=sys.stderr)
+
+        self.generation_config = {
+            "temperature": temperature,
+            "length_penalty": length_penalty,
+            "num_beams" if search_method == "beam" else "top_p": num_beams if search_method == "beam" else top_p,
+        }
+
+        
+    def image_to_text(self, images, batch_size=4, max_new_tokens=20):
+        results = []
+        start_inference = time.time()
+        for i in range(0, len(images), batch_size):
+            batch = images[i:i+batch_size]
+            inputs = self.processor(images=batch, return_tensors="pt")
+            
+            generated_ids = self.model.generate(
+                **inputs,
+                max_length=max_new_tokens+1,
+                early_stopping=True,
+                **self.generation_config,
+            )
+            
+            generated_texts = self.processor.batch_decode(generated_ids,
+                                                          skip_special_tokens=True,
+                                                          clean_up_tokenization_spaces=True)
+            results.extend(generated_texts)
+
+        finish_inference = time.time()
+        total_time = finish_inference - start_inference
+        if len(images) > 0 and total_time > 0.0:
+            print(f"BLIP2: Images processed: n={len(images)} total_time={total_time} sec  images_per_sec={len(images)/total_time}", file=sys.stderr)
+        return results
+
 
 class KeywordExtractor:
     def __init__(self):
@@ -222,7 +280,7 @@ def most_different_vectors(vector_list, k=3, threshold=0.05):
     return results, selected
 
 
-def process_input_files(model_path, k=3, neighborhood_threshold=0.08, blip2_model_path):
+def process_input_files(model_path, blip2_model_path="", k=3, neighborhood_threshold=0.08):
     """
     a. Read 1 line at a time from stdin  with 1 json per line ("jsonl" format)
     b. extract GIF from the json (base64 encoded) 
@@ -271,9 +329,12 @@ def process_input_files(model_path, k=3, neighborhood_threshold=0.08, blip2_mode
     blip = img2txt_blip2.BLIP2Wrapper()
     if not skip_img2txt:
         extractor = keyword_extractor.KeywordExtractor()
+        if blip2_model_path == "":
+            print("blip2_model_path not specified, and yet blip2 is enabled", file=sys.stderr)
+            sys.exit(3) # that's all folks
         try: 
             blip.initialize(
-                model_name="Salesforce/blip2-opt-2.7b",
+                model_path=blip2_model_path,
                 temperature=1.0,
                 fp16=enable_fp16,
                 search_method="beam",
@@ -362,7 +423,7 @@ def process_input_files(model_path, k=3, neighborhood_threshold=0.08, blip2_mode
         # in the event that the embeddings were zero, then we will have zero length indices list and
         #   selected_embeddings list; that means no output will occur. Emit msg.
         if len(selected_embeddings) == 0:
-            print(f"For hash={hash_value} image embedding was zero", file=sys.stderr)
+            print(f"For hash={hash_value} image embedding was zero", file=sys.stderr)  # very unlikely
             continue
         selected_images = [images[i] for i in indices]
 
@@ -371,7 +432,8 @@ def process_input_files(model_path, k=3, neighborhood_threshold=0.08, blip2_mode
             #   (selected_images is expected to be <=k)
             captions = blip.image_to_text(selected_images, batch_size=3, max_new_tokens=50)
             # deduplicate, remove high frequency words to get keywords
-            keywords = extractor.extract_keywords(" ".join(captions))
+            if len(captions) > 0:
+                keywords = extractor.extract_keywords(" ".join(captions))
 
         previously_processed.add(hash_value) # remember this to avoid duplicates
         total_embeddings_saved += len(selected_embeddings)
@@ -416,17 +478,18 @@ def process_input_files(model_path, k=3, neighborhood_threshold=0.08, blip2_mode
     print(f"Histogram of vector counts by hash (normalized): [{', '.join(f'{num:.2f}' for num in histogram)}]", file=sys.stderr)
 
 if __name__ == "__main__":
-    import argparse
 
     # Parse command-line arguments
-    parser = argparse.ArgumentParser(description="Process images in GIFs, generate embeddings using OpenCLIP, and output results.")
+    parser = argparse.ArgumentParser(description="Process images in GIFs, generate embeddings using OpenCLIP, \nand output results. Must specify model_path and optionally blip2_model_path")
     parser.add_argument("input_files", nargs="+", help="Input JSONL files containing image data")
     parser.add_argument("--model_path", help="path to OpenCLIP model directory with preprocess info in preprocess.pth")
+    parser.add_argument("--blip2_model_path", default="", help="path to BLIP2 model directory with preprocess info in preprocess.pth")
     parser.add_argument("--k", type=int, default=3, help="Number of clusters/vectors to select (default: 3)")
     parser.add_argument("--neighborhood_threshold", type=float, default=0.08, help="Minimum cosine distance between vectors (default: 0.08)")
-    parser.add_argument("--blip2_model_path", help="path to BLIP2 model directory with preprocess info in preprocess.pth")
 
     args = parser.parse_args()
+    if args.blip2_model_path != "":
+        skip_img2txt = False
 
     process_input_files(os.path.expanduser(args.model_path), args.k, args.neighborhood_threshold)
 
